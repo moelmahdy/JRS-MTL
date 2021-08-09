@@ -1,4 +1,4 @@
-# JRS-MTL
+# Joint Registration and Segmentation using Multi-Task Learning 
 
 This project is a pytorch implementation of the joint registration and segmentation methods described in the paper [Joint Registration and Segmentation via Multi-Task Learning for Adaptive Radiotherapy of Prostate Cancer](https://ieeexplore.ieee.org/document/9460972?source=authoralert)
 
