@@ -12,14 +12,15 @@ Main
 """
 
 import argparse
-from utils.libs import parser
-from agents import *
-from utils.config import *
-import sys, os
+import os
+import sys
 from shutil import copyfile
 
-def main():
+from utils.config import *
+from utils.libs import parser
 
+
+def main():
     arg_parser = argparse.ArgumentParser(description="")
     arg_parser.add_argument('config',
                             metavar='config_json_file',
@@ -28,7 +29,6 @@ def main():
 
     args_obj = arg_parser.parse_args()
     # parse the config json file
-    # args = process_config(args_obj.config)
     args, _ = get_config_from_json(args_obj.config)
     setup_logging(args.log_dir, args)
 
@@ -37,7 +37,7 @@ def main():
     else:
         data_config = parser(args.config_path)
 
-    #Create the Agent and pass all the configuration to it then run it..
+    # Create the Agent and pass all the configuration to it then run it..
     agent_class = globals()[args.agent]
     agent_path = os.path.abspath(sys.modules[agent_class.__module__].__file__)
     if not os.path.exists(os.path.join(args.log_dir, agent_path.split('/')[-1])):
