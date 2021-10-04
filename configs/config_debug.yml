@@ -1,0 +1,25 @@
+#Data configuration
+
+# fixed images
+csv_fixed_image : '/exports/lkeb-hpc/mseelmahdy/joint-registration-segmentation-using-multi-task-learning/data/debug/fixed_CTImage.csv'
+csv_fixed_torso : '/exports/lkeb-hpc/mseelmahdy/joint-registration-segmentation-using-multi-task-learning/data/debug/fixed_Torso.csv'
+csv_fixed_rectum_label : '/exports/lkeb-hpc/mseelmahdy/joint-registration-segmentation-using-multi-task-learning/data/debug/fixed_Rectum.csv'
+csv_fixed_bladder_label : '/exports/lkeb-hpc/mseelmahdy/joint-registration-segmentation-using-multi-task-learning/data/debug/fixed_Bladder.csv'
+csv_fixed_gtv_label : '/exports/lkeb-hpc/mseelmahdy/joint-registration-segmentation-using-multi-task-learning/data/debug/fixed_GTV.csv'
+csv_fixed_segmentation_mask_label : '/exports/lkeb-hpc/mseelmahdy/joint-registration-segmentation-using-multi-task-learning/data/debug/fixed_Segmentation_Mask.csv'
+csv_fixed_segmentation_label : '/exports/lkeb-hpc/mseelmahdy/joint-registration-segmentation-using-multi-task-learning/data/debug/fixed_Segmentation.csv'
+
+# moving images
+csv_moving_image : '/exports/lkeb-hpc/mseelmahdy/joint-registration-segmentation-using-multi-task-learning/data/debug/moving_CTImage.csv'
+csv_moving_torso : '/exports/lkeb-hpc/mseelmahdy/joint-registration-segmentation-using-multi-task-learning/data/debug/moving_Torso.csv'
+csv_moving_rectum_label : '/exports/lkeb-hpc/mseelmahdy/joint-registration-segmentation-using-multi-task-learning/data/debug/moving_Rectum.csv'
+csv_moving_bladder_label : '/exports/lkeb-hpc/mseelmahdy/joint-registration-segmentation-using-multi-task-learning/data/debug/moving_Bladder.csv'
+csv_moving_gtv_label : '/exports/lkeb-hpc/mseelmahdy/joint-registration-segmentation-using-multi-task-learning/data/debug/moving_GTV.csv'
+csv_moving_segmentation_mask_label : '/exports/lkeb-hpc/mseelmahdy/joint-registration-segmentation-using-multi-task-learning/data/debug/moving_Segmentation_Mask.csv'
+csv_moving_segmentation_label : '/exports/lkeb-hpc/mseelmahdy/joint-registration-segmentation-using-multi-task-learning/data/debug/moving_Segmentation.csv'
+
+#sampling images
+csv_sampler : '/exports/lkeb-hpc/mseelmahdy/joint-registration-segmentation-using-multi-task-learning/data/debug/fixed_Sampler.csv'
+
+# data split files
+csv_split_file: '/exports/lkeb-hpc/mseelmahdy/JRS-MTL/data/debug/data_split.csv'

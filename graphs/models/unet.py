@@ -20,7 +20,7 @@ class UNet(nn.Module):
     initial_channels : TYPE, optional
         Number of initial channels. The default is 32.
     channels_list: list, optional
-        list of number of featur maps at every depth in case of customized number of feature maps.
+        List of number of channels at every depth in case of customized number of channels.
     '''
 
     def __init__(self, in_channels, out_channels, depth=5, initial_channels=32, channels_list= None):
@@ -29,6 +29,7 @@ class UNet(nn.Module):
         self.depth = depth
         prev_channels = in_channels
         self.down_path = nn.ModuleList()
+        self.res_list = nn.ModuleList()
         for i in range(self.depth):
             if channels_list == None:
                 current_channels = 2 ** i * initial_channels
@@ -38,19 +39,20 @@ class UNet(nn.Module):
             prev_channels = current_channels
 
         self.up_path = nn.ModuleList()
-        for i in reversed(range(self.depth - 1)):
+        for i in reversed(range(self.depth-1)):
             if channels_list == None:
                 current_channels = 2 ** i * initial_channels
             else:
                 current_channels = channels_list[i]
-            self.up_path.append(UpBlock(prev_channels, current_channels))
+            self.up_path.append(UpBlock(prev_channels+current_channels, current_channels))
             prev_channels = current_channels
+            self.res_list.append(nn.Conv3d(channels_list[i+1], out_channels, kernel_size=1))
 
-
-        self.last = nn.Conv3d(prev_channels, out_channels, kernel_size=1)
+        self.res_list.append(nn.Conv3d(channels_list[0], out_channels, kernel_size=1))
 
     def forward(self, x):
         blocks = []
+        out = []
         for i, down in enumerate(self.down_path):
             x = down(x)
             if i < self.depth - 1:
@@ -58,10 +60,17 @@ class UNet(nn.Module):
                 x = F.interpolate(x, scale_factor=0.5, mode='trilinear', align_corners=True,
                                   recompute_scale_factor=False)
 
-        for i, up in enumerate(self.up_path):
-            x = up(x, blocks[-i - 1])
+        for i, (up, res) in enumerate(zip(self.up_path, self.res_list)):
 
-        return self.last(x)
+            if i == 0:
+                out.append(res(x))
+                x = up(x, blocks[-i - 1])
+            else:
+                out.append(res(x))
+                x = up(x, blocks[-i - 1])
+
+
+        return out
 
 
 class ConvBlock(nn.Module):
@@ -72,6 +81,12 @@ class ConvBlock(nn.Module):
         block.append(nn.Conv3d(in_channels, out_channels, kernel_size=3, padding=1))
         block.append(nn.BatchNorm3d(out_channels))
         block.append(nn.LeakyReLU(LeakyReLU_slope))
+
+        block.append(nn.Conv3d(out_channels, out_channels, kernel_size=3, padding=1))
+        block.append(nn.LeakyReLU(LeakyReLU_slope))
+        block.append(nn.BatchNorm3d(out_channels))
+
+
 
         self.block = nn.Sequential(*block)
 
@@ -84,12 +99,11 @@ class UpBlock(nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
 
-        self.conv = nn.Conv3d(in_channels, out_channels, kernel_size=1)
         self.conv_block = ConvBlock(in_channels, out_channels)
 
     def forward(self, x, skip):
-        x_up = F.interpolate(x, skip.shape[2:], mode='trilinear', align_corners=True)
-        x_up_conv = self.conv(x_up)
+        x_up_conv = F.interpolate(x, skip.shape[2:], mode='trilinear', align_corners=True)
+        # x_up_conv = self.conv(x_up)
         out = torch.cat([x_up_conv, skip], 1)
         out = self.conv_block(out)
         return out

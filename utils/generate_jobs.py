@@ -48,7 +48,7 @@ def write_and_submit_job(setting, job_name, script_address, root_log_path=None, 
         string_file.close()
 
     submit_cmd = 'sbatch ' + str(job_script_address)
-    os.system(submit_cmd)
+    # os.system(submit_cmd)
 
 def submit_job(job_name, script_address, setting=None, root_log_path=None, mode=None, json_script=None):
     # Choosing the preferred setting and backup the whole code and submit the job

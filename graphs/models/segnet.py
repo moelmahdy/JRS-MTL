@@ -20,7 +20,7 @@ class SegNet(nn.Module):
     initial_channels : int, optional
         Number of initial channels. The default is 64.
     channels_list: list, optional
-        list of number of featur maps at every depth in case of customized number of feature maps.
+        List of number of channels at every depth in case of customized number of channels.
     '''
 
     def __init__(self, in_channels=1, classes= 5, depth=5, initial_channels=64, channels_list = None):
@@ -33,19 +33,26 @@ class SegNet(nn.Module):
         self.unet = unet.UNet(in_channels=in_channels, out_channels=classes, depth=depth,
                               initial_channels=initial_channels, channels_list= channels_list)
 
-    def forward(self, input_image):
+    def forward(self, fixed_image, moving_image=None, moving_label=None):
         '''
         Parameters
         ----------
-        input_image : (n, 1, d, h, w)
+        input_image : (n, c, d, h, w)
             The first dimension contains the number of patches.
         Returns
         -------
-        logits : (n. classes, d, h, w)
+        logits : (n, classes, d, h, w)
             logits of the images.
         '''
 
-        original_image_shape = input_image.shape[2:]
+        original_image_shape = fixed_image.shape[2:]
+        input_image = fixed_image
+        if moving_image is not None:
+            input_image = torch.unsqueeze(torch.stack((input_image, moving_image), dim=0), 0)  # (n, 2, d, h, w)
+        if moving_label is not None:
+            input_image = torch.unsqueeze(torch.stack((input_image, moving_label), dim=0), 0)  # (n, 2, d, h, w) or (n, 3, d, h, w)
+
+        test = self.unet(input_image)
         logits = torch.squeeze(self.unet(input_image), 0).reshape(self.n,  self.num_Classes, *original_image_shape)  #(n, classes, d, h, w)
         probs = F.softmax(logits, dim=1)
         _, predicted_label = torch.max(probs, dim=1, keepdim=True)

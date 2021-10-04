@@ -1,8 +1,21 @@
 import numpy as np
 import torch
 
-from graphs.models import regnet
+'''
+    Parse the config file
+    ----------
+    file : json
+        config file
+    '''
+def parser(file):
+    class dotdict(dict):
+        """dot.notation access to dictionary attributes"""
+        __getattr__ = dict.get
+        __setattr__ = dict.__setitem__
+        __delattr__ = dict.__delitem__
 
+    import yaml
+    return (dotdict(yaml.load(open(file))))
 
 class StopCriterion(object):
     def __init__(self, stop_std=0.001, query_len=100, num_min_iter=200):
@@ -29,76 +42,69 @@ class StopCriterion(object):
             return False
 
 
-class CalcDisp(object):
-    def __init__(self, dim, calc_device='cuda'):
-        self.device = torch.device(calc_device)
-        self.dim = dim
-        self.spatial_transformer = regnet.SpatialTransformer(dim=dim)
 
-    def inverse_disp(self, disp, threshold=0.01, max_iteration=20):
-        '''
-        compute the inverse field. implementation of "A simple fixed‐point approach to invert a deformation field"
-        disp : (n, 2, h, w) or (n, 3, d, h, w) or (2, h, w) or (3, d, h, w)
-            displacement field
-        '''
-        forward_disp = disp.detach().to(device=self.device)
-        if disp.ndim < self.dim + 2:
-            forward_disp = torch.unsqueeze(forward_disp, 0)
-        backward_disp = torch.zeros_like(forward_disp)
-        backward_disp_old = backward_disp.clone()
-        for i in range(max_iteration):
-            backward_disp = -self.spatial_transformer(forward_disp, backward_disp)
-            diff = torch.max(torch.abs(backward_disp - backward_disp_old)).item()
-            if diff < threshold:
-                break
-            backward_disp_old = backward_disp.clone()
-        if disp.ndim < self.dim + 2:
-            backward_disp = torch.squeeze(backward_disp, 0)
+def resize_image_mlvl(args, image, level):
+    return (image[:, :, (args.mlvl_borders[level]):(args.patch_size[0] - args.mlvl_borders[level]),
+            (args.mlvl_borders[level]):(args.patch_size[1] - args.mlvl_borders[level]),
+            (args.mlvl_borders[level]):(args.patch_size[2] - args.mlvl_borders[level])]) \
+            [:, :, ::args.mlvl_strides[level], ::args.mlvl_strides[level], ::args.mlvl_strides[level]]
 
-        return backward_disp
+def clean_data(fimage, flabel, mimage, mlabel, args):
+    # format the input images in the right format for pytorch model
+    nbatches, wsize, nchannels, x, y, z, _ = fimage.size()
+    fimage = fimage.view(nbatches * wsize, nchannels, x, y, z).to(args.device)  # (n, 1, d, w, h)
+    flabel = flabel.view(nbatches * wsize, nchannels, x, y, z).to(args.device)
+    mimage = mimage.view(nbatches * wsize, nchannels, x, y, z).to(args.device)
+    mlabel = mlabel.view(nbatches * wsize, nchannels, x, y, z).to(args.device)
 
-    def compose_disp(self, disp_i2t, disp_t2i, mode='corr'):
-        '''
-        compute the composition field
+    # normalize image intensity
+    fimage[fimage > 1000] = 1000
+    fimage[fimage < -1000] = -1000
+    fimage = fimage / 1000
 
-        disp_i2t: (n, 3, d, h, w)
-            displacement field from the input image to the template
+    mimage[mimage > 1000] = 1000
+    mimage[mimage < -1000] = -1000
+    mimage = mimage / 1000
 
-        disp_t2i: (n, 3, d, h, w)
-            displacement field from the template to the input image
+    # resize the images for different resolutions
+    fimage = fimage.to(args.device)  # size B*C*D*W,H
+    flabel = flabel.to(args.device).float()
+    mimage = mimage.to(args.device)  # size B*C*D*W,H
+    mlabel = mlabel.to(args.device).float()
 
-        mode: string, default 'corr'
-            'corr' means generate composition of corresponding displacement field in the batch dimension only, the result shape is the same as input (n, 3, d, h, w)
-            'all' means generate all pairs of composition displacement field. The result shape is (n, n, 3, d, h, w)
-        '''
-        disp_i2t_t = disp_i2t.detach().to(device=self.device)
-        disp_t2i_t = disp_t2i.detach().to(device=self.device)
-        if disp_i2t.ndim < self.dim + 2:
-            disp_i2t_t = torch.unsqueeze(disp_i2t_t, 0)
-        if disp_t2i.ndim < self.dim + 2:
-            disp_t2i_t = torch.unsqueeze(disp_t2i_t, 0)
+    flabel_high = resize_image_mlvl(args, flabel, 0)
+    flabel_mid = resize_image_mlvl(args, flabel, 1)
+    flabel_low = resize_image_mlvl(args, flabel, 2)
 
-        if mode == 'corr':
-            composed_disp = self.spatial_transformer(disp_t2i_t,
-                                                     disp_i2t_t) + disp_i2t_t  # (n, 2, h, w) or (n, 3, d, h, w)
-        elif mode == 'all':
-            assert len(disp_i2t_t) == len(disp_t2i_t)
-            n, _, *image_shape = disp_i2t.shape
-            disp_i2t_nxn = torch.repeat_interleave(torch.unsqueeze(disp_i2t_t, 1), n,
-                                                   1)  # (n, n, 2, h, w) or (n, n, 3, d, h, w)
-            disp_i2t_nn = disp_i2t_nxn.reshape(n * n, self.dim,
-                                               *image_shape)  # (n*n, 2, h, w) or (n*n, 3, d, h, w), the order in the first dimension is [0_T, 0_T, ..., 0_T, 1_T, 1_T, ..., 1_T, ..., n_T, n_T, ..., n_T]
-            disp_t2i_nn = torch.repeat_interleave(torch.unsqueeze(disp_t2i_t, 0), n, 0).reshape(n * n, self.dim,
-                                                                                                *image_shape)  # (n*n, 2, h, w) or (n*n, 3, d, h, w), the order in the first dimension is [0_T, 1_T, ..., n_T, 0_T, 1_T, ..., n_T, ..., 0_T, 1_T, ..., n_T]
-            composed_disp = self.spatial_transformer(disp_t2i_nn, disp_i2t_nn).reshape(n, n, self.dim,
-                                                                                       *image_shape) + disp_i2t_nxn  # (n, n, 2, h, w) or (n, n, 3, d, h, w) + disp_i2t_nxn
-        else:
-            raise
-        if disp_i2t.ndim < self.dim + 2 and disp_t2i.ndim < self.dim + 2:
-            composed_disp = torch.squeeze(composed_disp)
-        return composed_disp
+    fimage_high = resize_image_mlvl(args, fimage, 0)
+    fimage_mid = resize_image_mlvl(args, fimage, 1)
+    fimage_low = resize_image_mlvl(args, fimage, 2)
 
+    mlabel_high = resize_image_mlvl(args, mlabel, 0)
+    mlabel_mid = resize_image_mlvl(args, mlabel, 1)
+    mlabel_low = resize_image_mlvl(args, mlabel, 2)
 
+    mimage_high = resize_image_mlvl(args, mimage, 0)
+    mimage_mid = resize_image_mlvl(args, mimage, 1)
+    mimage_low = resize_image_mlvl(args, mimage, 2)
+
+    mlabel_high_hot = torch.eye(args.num_classes_seg)[mlabel_high.squeeze(1).long()]
+    mlabel_high_hot = mlabel_high_hot.permute(0, 4, 1, 2, 3).float().to(args.device)
+
+    mlabel_mid_hot = torch.eye(args.num_classes_seg)[mlabel_mid.squeeze(1).long()]
+    mlabel_mid_hot = mlabel_mid_hot.permute(0, 4, 1, 2, 3).float().to(args.device)
+
+    mlabel_low_hot = torch.eye(args.num_classes_seg)[mlabel_low.squeeze(1).long()]
+    mlabel_low_hot = mlabel_low_hot.permute(0, 4, 1, 2, 3).float().to(args.device)
+
+    data_dict = {'fimage': fimage, 'mimage': mimage, 'mlabel': mlabel,
+                 'flabel_high':flabel_high, 'flabel_mid':flabel_mid, 'flabel_low':flabel_low,
+                 'fimage_high':fimage_high, 'fimage_mid':fimage_mid, 'fimage_low':fimage_low,
+                 'mlabel_high':mlabel_high, 'mlabel_mid':mlabel_mid, 'mlabel_low':mlabel_low,
+                 'mimage_high':mimage_high, 'mimage_mid':mimage_mid, 'mimage_low':mimage_low,
+                 'mlabel_high_hot':mlabel_high_hot, 'mlabel_mid_hot':mlabel_mid_hot, 'mlabel_low_hot':mlabel_low_hot}
+
+    return data_dict
 class Struct:
     def __init__(self, **entries):
         self.__dict__.update(entries)

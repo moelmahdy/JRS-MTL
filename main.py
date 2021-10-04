@@ -12,24 +12,23 @@ Main
 """
 
 import argparse
-import os
-import sys
 from shutil import copyfile
 
+from agents import *
 from utils.config import *
-from utils.libs import parser
+from utils.util import parser
 
 
 def main():
     arg_parser = argparse.ArgumentParser(description="")
-    arg_parser.add_argument('config',
-                            metavar='config_json_file',
+    arg_parser.add_argument('args',
+                            metavar='args_json_file',
                             default='None',
-                            help='The Configuration file in json format')
+                            help='The arguments file in json format')
 
     args_obj = arg_parser.parse_args()
     # parse the config json file
-    args, _ = get_config_from_json(args_obj.config)
+    args, _ = get_config_from_json(args_obj.args)
     setup_logging(args.log_dir, args)
 
     if args.is_debug:

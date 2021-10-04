@@ -64,36 +64,57 @@ class NCC(nn.Module):
         return 1.0-torch.mean(cc)
 
 
-def smooth_loss(disp, image):
-    '''
-    Calculate the smooth loss. Return mean of absolute or squared of the forward difference of  flow field.
+class GradientSmoothing(nn.Module):
+    def __init__(self, energy_type):
+        super(GradientSmoothing, self).__init__()
+        self.energy_type = energy_type
 
-    Parameters
-    ----------
-    disp : (n, 3, d, h, w)
-        displacement field
+    def forward(self, dvf):
 
-    image : (1, 1, d, h, w)
-    '''
+        def gradient_dx(fv):
+            return (fv[:, 2:, 1:-1, 1:-1] - fv[:, :-2, 1:-1, 1:-1]) / 2
 
-    image_shape = disp.shape
-    dim = len(image_shape[2:])
+        def gradient_dy(fv):
+            return (fv[:, 1:-1, 2:, 1:-1] - fv[:, 1:-1, :-2, 1:-1]) / 2
 
-    d_disp = torch.zeros((image_shape[0], dim) + tuple(image_shape[1:]), dtype=disp.dtype, device=disp.device)
-    d_image = torch.zeros((image_shape[0], dim) + tuple(image_shape[1:]), dtype=disp.dtype, device=disp.device)
+        def gradient_dz(fv):
+            return (fv[:, 1:-1, 1:-1, 2:] - fv[:, 1:-1, 1:-1, :-2]) / 2
 
+        def gradient_txyz(Txyz, fn):
+            return torch.stack([fn(Txyz[..., i]) for i in [0, 1, 2]], dim=4)
 
-    d_disp[:, 2, :, :-1, :, :] = (disp[:, :, 1:, :, :] - disp[:, :, :-1, :, :])
-    d_disp[:, 1, :, :, :-1, :] = (disp[:, :, :, 1:, :] - disp[:, :, :, :-1, :])
-    d_disp[:, 0, :, :, :, :-1] = (disp[:, :, :, :, 1:] - disp[:, :, :, :, :-1])
+        def compute_gradient_norm(displacement, flag_l1=False):
+            dTdx = gradient_txyz(displacement, gradient_dx)
+            dTdy = gradient_txyz(displacement, gradient_dy)
+            dTdz = gradient_txyz(displacement, gradient_dz)
+            if flag_l1:
+                norms = torch.abs(dTdx) + torch.abs(dTdy) + torch.abs(dTdz)
+            else:
+                norms = dTdx ** 2 + dTdy ** 2 + dTdz ** 2
+            return torch.mean(norms)
 
-    d_image[:, 2, :, :-1, :, :] = (image[:, :, 1:, :, :] - image[:, :, :-1, :, :])
-    d_image[:, 1, :, :, :-1, :] = (image[:, :, :, 1:, :] - image[:, :, :, :-1, :])
-    d_image[:, 0, :, :, :, :-1] = (image[:, :, :, :, 1:] - image[:, :, :, :, :-1])
+        def compute_bending_energy(displacement):
+            dTdx = gradient_txyz(displacement, gradient_dx)
+            dTdy = gradient_txyz(displacement, gradient_dy)
+            dTdz = gradient_txyz(displacement, gradient_dz)
+            dTdxx = gradient_txyz(dTdx, gradient_dx)
+            dTdyy = gradient_txyz(dTdy, gradient_dy)
+            dTdzz = gradient_txyz(dTdz, gradient_dz)
+            dTdxy = gradient_txyz(dTdx, gradient_dy)
+            dTdyz = gradient_txyz(dTdy, gradient_dz)
+            dTdxz = gradient_txyz(dTdx, gradient_dz)
+            return torch.mean(dTdxx ** 2 + dTdyy ** 2 + dTdzz ** 2 + 2 * dTdxy ** 2 + 2 * dTdxz ** 2 + 2 * dTdyz ** 2)
 
-    loss = torch.mean(torch.sum(torch.abs(d_disp), dim=2, keepdims=True))
+        if self.energy_type == 'bending':
+            energy = compute_bending_energy(dvf)
+        elif self.energy_type == 'gradient-l2':
+            energy = compute_gradient_norm(dvf)
+        elif self.energy_type == 'gradient-l1':
+            energy = compute_gradient_norm(dvf, flag_l1=True)
+        else:
+            raise Exception('Not recognised local regulariser!')
 
-    return loss
+        return energy
 
 
 def make_one_hot(labels, num_classes):
@@ -115,7 +136,7 @@ def make_one_hot(labels, num_classes):
     return target
 
 
-class multi_dice_loss(nn.Module):
+class Multi_DSC_Loss(nn.Module):
     '''
         Calculate the multi dice loss.
 
@@ -153,6 +174,45 @@ class multi_dice_loss(nn.Module):
         dsc_list_per_image = (2. * inter / (union + 1e-3))[:, 1:]
         dsc_mean = 1 - (dsc_list_per_image.mean(axis=0))
         return  dsc_mean
+
+
+class Dice(nn.Module):
+    def __init__(self):
+        super(Dice, self).__init__()
+        pass
+
+    def forward(self, true, logits, use_activation=True, num_classes=5):
+
+        dice_loss, dice_list = self.dice_loss(true, logits, num_classes, use_activation)
+
+        return dice_loss, dice_list
+
+    def dice_loss(self, true, logits, num_classes, use_activation, eps=1e-7):
+        """Computes the SørensenDice loss.
+        Note that PyTorch optimizers minimize a loss. In this
+        case, we would like to maximize the dice loss so we
+        return the negated dice loss.
+        Args:
+            true: a tensor of shape [B, 1, H, W, D].
+            logits: a tensor of shape [B, C, H, W, D]. Corresponds to
+                the raw output or logits of the model.
+            eps: added to the denominator for numerical stability.
+        Returns:
+            dice_loss: the SørensenDice loss.
+        """
+        true_1_hot = torch.eye(num_classes)[true.squeeze(1).long()]
+        true_1_hot = true_1_hot.permute(0, 4, 1, 2, 3).float().to(true.device)
+        if use_activation:
+            probas = F.softmax(logits, dim=1)
+        else:
+            probas = logits
+        true_1_hot = true_1_hot.type(logits.type())
+        dims = (0,) + tuple(range(2, true.ndimension()))
+        intersection = torch.sum(probas * true_1_hot, dims)
+        cardinality = torch.sum(probas + true_1_hot, dims)
+        dice_list = (2. * intersection / (cardinality + eps))
+        dice_loss = dice_list[1:].mean()
+        return (1 - dice_loss), dice_list[1:]
 
 
 

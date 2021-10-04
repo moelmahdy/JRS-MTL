@@ -146,10 +146,13 @@ def process_config_gen(json_file, exp_name, exp_dict):
     config.is_debug = exp_dict['is_debug']
     config.num_featurmaps = exp_dict['num_featurmaps']
     config.task_ids = exp_dict['task_ids']
-    if exp_dict['weight'] is None:
-        config.weight = 'None'
-    else:
-        config.weight = exp_dict['weight']
+    if "num_classes" in exp_dict:
+        config.num_classes = exp_dict["num_classes"]
+    if "weight" in exp_dict:
+        if exp_dict['weight'] is None:
+            config.weight = 'None'
+        else:
+            config.weight = exp_dict['weight']
 
     # making sure that you have provided the exp_name.
     try:
@@ -194,38 +197,34 @@ def process_config_gen(json_file, exp_name, exp_dict):
     config.log_dir = os.path.join(config.root_exp_path, config.task, config.exp_name, "logs/")
     config.tensorboard_dir = os.path.join(config.root_exp_path, config.task, config.exp_name, "tensorboard/")
 
-    create_dirs([config.checkpoint_dir, config.prediction_dir, config.log_dir, config.tensorboard_dir])
+    create_dirs([config.model_dir, config.output_dir, config.log_dir, config.tensorboard_dir])
 
+    if "input_seg" in exp_dict:
+        if exp_dict['input_seg'] is not None:
+            config.input_segmentation = exp_dict['input_seg'].split('_')
+        else:
+            config.input_segmentation = 'None'
 
-    if exp_dict['input_seg'] is not None:
-        config.in_channels_seg = len(exp_dict['input_seg'].split('_'))
-    else:
-        config.in_channels_seg = 'None'
+    if "input_reg" in exp_dict:
+        if exp_dict['input_reg'] is not None:
+            config.input_registration = exp_dict['input_reg'].split('_')
+        else:
+            config.input_registration = 'None'
 
-    if exp_dict['input_reg'] is not None:
-        config.in_channels_reg = len(exp_dict['input_reg'].split('_'))
-    else:
-        config.in_channels_reg = 'None'
+    if "loss_seg" in exp_dict:
+        if exp_dict['loss_seg'] is not None:
+            config.loss_segmentation = exp_dict['loss_seg'].split('_')
+        else:
+            config.loss_segmentation = 'None'
 
-    if exp_dict['input_seg'] is not None:
-        config.input_segmentation = exp_dict['input_seg'].split('_')
-    else:
-        config.input_segmentation = 'None'
+    if "loss_reg" in exp_dict:
+        if exp_dict['loss_reg'] is not None:
+            config.loss_registration = exp_dict['loss_reg'].split('_')
+        else:
+            config.loss_registration = exp_dict['loss_reg']
 
-    if exp_dict['input_reg'] is not None:
-        config.input_registration = exp_dict['input_reg'].split('_')
-    else:
-        config.input_registration = 'None'
-
-    if exp_dict['loss_seg'] is not None:
-        config.loss_segmentation = exp_dict['loss_seg'].split('_')
-    else:
-        config.loss_segmentation = 'None'
-
-    if exp_dict['loss_reg'] is not None:
-        config.loss_registration = exp_dict['loss_reg'].split('_')
-    else:
-        config.loss_registration = exp_dict['loss_reg']
+    if "input" in exp_dict:
+        config.input = exp_dict['input'].split('_')
 
     #save version of the configuration file to the experiment log path
     with open(os.path.join(config.log_dir, 'args_'+config.mode+'.json'), 'w') as fp:

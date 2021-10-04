@@ -9,6 +9,8 @@
   "mlvl_strides": [1, 2, 4],
   "mlvl_borders": [20, 18, 14],
   "optim": "radam",
+  "depth": 3,
+  "initial_channels": "None",
 
   "patch_size": [96,96,96],
   "padding_size": [48,48,48],
