@@ -45,15 +45,14 @@ class RegNet(nn.Module):
             Flow field from fixed image to moving image.
         '''
 
-        original_image_shape = fixed_image.shape[2:]
-        input_image = torch.unsqueeze(torch.stack((fixed_image, moving_image), dim=0), 0)  # (n, 2, d, h, w)
+        input_image = torch.cat((fixed_image, moving_image), dim=1)  # (n, 2, d, h, w)
         if moving_label is not None:
-            input_image = torch.unsqueeze(torch.stack((input_image, moving_label), dim=0), 0)  # (n, 3, d, h, w)
+            input_image = torch.cat((input_image, moving_label), dim=1)  # (n, 3, d, h, w)
 
-        disp = torch.squeeze(self.unet(input_image), 0).reshape(self.dim, *original_image_shape)  #(n, 3, d, h, w)
-        disp = torch.unsqueeze(disp, 0)
+        disp_list = self.unet(input_image)  #(n, 3, d, h, w)
 
-        warped_moving_image = self.spatial_transform(moving_image, disp, mode='bilinear').squeeze()  #(n, 1, d, h, w)
+        # disp_list = [torch.unsqueeze(x, 0) for x in disp_list]
+        # warped_moving_image_list = [self.spatial_transform(moving_image, x, mode='trilinear').squeeze() for x in disp_list]  #(n, 1, d, h, w)
 
-        res = {'disp': disp.squeeze(0), 'warped_moving_image': warped_moving_image}
+        res = {'dvf_low': disp_list[0], 'dvf_mid': disp_list[1], 'dvf_high': disp_list[2]}
         return res

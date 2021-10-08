@@ -21,7 +21,7 @@ def setup_logging(log_dir, config):
     main_logger = logging.getLogger()
     main_logger.setLevel(logging.INFO)
 
-    exp_file_handler = RotatingFileHandler('{}exp_debug_{}.log'.format(log_dir, config.mode), maxBytes=10**6, backupCount=5)
+    exp_file_handler = RotatingFileHandler('{}{}.log'.format(log_dir, config.mode), maxBytes=10**6, backupCount=5)
     stdout_handler = logging.StreamHandler(sys.stdout)
     exp_file_handler.setLevel(logging.DEBUG)
     exp_file_handler.setFormatter(Formatter(log_file_format))

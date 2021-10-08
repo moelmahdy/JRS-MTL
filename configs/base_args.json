@@ -18,6 +18,7 @@
   "voxel_dim": [1.0, 1.0, 1.0],
   "windows_per_volume": 3,
   "level_weights": [0.3333,0.3333,0.3333],
+  "ncc_window_size":9,
 
   "batch_size": 2,
   "lr": 0.0005,

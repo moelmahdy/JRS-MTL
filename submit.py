@@ -1,13 +1,14 @@
 import os
 
 from utils.config import process_config_gen
+from utils.generate_jobs import submit_job
 
 setting = dict()
 setting['cluster_manager'] = 'Slurm'
 setting['NumberOfGPU'] = 1
 setting['cluster_MemPerCPU'] = 7500
 setting['cluster_NumberOfCPU'] = 7            # Number of CPU per job
-setting['cluster_NodeList'] = 'res-hpc-gpu02' # ['res-hpc-gpu01','res-hpc-gpu02','res-hpc-lkeb03',---,'res-hpc-lkeb07']
+setting['cluster_NodeList'] = 'res-hpc-lkeb03' # ['res-hpc-gpu01','res-hpc-gpu02','res-hpc-lkeb03',---,'res-hpc-lkeb07']
 
 
 if 'lkeb' in setting['cluster_NodeList']:
@@ -37,10 +38,10 @@ experiments_dict['registration_b'] ={'model_name':'Reg', 'task':'Single-Task', '
 
 
 exp = experiments_dict['segmentation_a']
-exp['is_debug'] = True
+exp['is_debug'] = False
 exp['mode'] = 'train' #['train', 'inference', 'eval']
 
-base_json_script = '/exports/lkeb-hpc/mseelmahdy/JRS-MTL/configs/base_config.json'
+base_json_script = '/exports/lkeb-hpc/mseelmahdy/JRS-MTL/configs/base_args.json'
 script_address = '/exports/lkeb-hpc/mseelmahdy/JRS-MTL/main.py'
 root_log_path = os.path.join('/exports/lkeb-hpc/mseelmahdy/JRS-MTL/experiments', exp['task'])
 
@@ -54,4 +55,4 @@ if exp['is_debug']:
 
 config = process_config_gen(base_json_script, exp_name, exp)
 json_script = os.path.join(config.log_dir)
-# submit_job(exp_name, script_address, setting=setting, root_log_path=root_log_path, mode=exp['mode'], json_script=json_script)
+submit_job(exp_name, script_address, setting=setting, root_log_path=root_log_path, mode=exp['mode'], json_script=json_script)

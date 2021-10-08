@@ -215,4 +215,86 @@ class Dice(nn.Module):
         return (1 - dice_loss), dice_list[1:]
 
 
+class Homoscedastic(torch.nn.Module):
+  '''https://arxiv.homoscedasticorg/abs/1705.07115'''
+  def __init__(self, n_tasks, reduction='sum'):
+    super(Homoscedastic, self).__init__()
+    self.n_tasks = n_tasks
+    self.log_vars = torch.nn.Parameter(torch.zeros(self.n_tasks))
+    self.reduction = reduction
+
+  def forward(self, losses):
+    dtype = losses.dtype
+    device = losses.device
+    stds = (torch.exp(self.log_vars)**(1/2)).to(device).to(dtype)
+    coeffs = 1/(stds**2)
+    multi_task_losses = coeffs*losses + torch.log(stds)
+
+    if self.reduction == 'sum':
+      multi_task_losses = multi_task_losses.sum()
+    if self.reduction == 'mean':
+      multi_task_losses = multi_task_losses.mean()
+
+    return multi_task_losses
+
+def grad_norm(self, lossList):
+    # get the sum of weighted losses
+    task_losses = torch.stack(lossList)
+    weighted_losses = self.weights * task_losses
+    total_weighted_loss = weighted_losses.sum()
+
+    self.optimizer.zero_grad()
+
+    # compute and retain gradients
+    total_weighted_loss.backward(retain_graph=True)
+
+    # GRADNORM - learn the weights for each tasks gradients
+
+    # zero the w_i(t) gradients since we want to update the weights using gradnorm loss
+    self.weights.grad = 0.0 * self.weights.grad
+
+    W = [param for name, param in self.model.named_parameters() if (self.args.shared_layers_key in name)]
+
+    norms = []
+
+    for w_i, L_i in zip(self.weights, task_losses):
+        # gradient of L_i(t) w.r.t. W
+        gLgW = torch.autograd.grad(L_i, W, retain_graph=True)
+
+        # G^{(i)}_W(t)
+        norms.append(torch.norm(w_i * gLgW[0], 2))
+
+    norms = torch.stack(norms)
+
+    # set L(0)
+    # if using log(C) init, remove these two lines
+    if self.current_epoch == 0:
+        self.initial_losses = task_losses.detach()
+
+    # compute the constant term without accumulating gradients
+    # as it should stay constant during back-propagation
+    with torch.no_grad():
+        # loss ratios \curl{L}(t)
+        loss_ratios = task_losses / self.initial_losses
+
+        # inverse training rate r(t)
+        inverse_train_rates = loss_ratios / loss_ratios.mean()
+
+        constant_term = norms.mean() * (inverse_train_rates ** self.alpha)
+
+    # write out the gradnorm loss L_grad and set the weight gradients
+
+    grad_norm_loss = (norms - constant_term).abs().sum()
+    self.weights.grad = torch.autograd.grad(grad_norm_loss, self.weights)[0]
+
+    # apply gradient descent
+    self.optimizer.step()
+
+    # renormalize the gradient weights
+    with torch.no_grad():
+        normalize_coeff = len(self.weights) / self.weights.sum()
+        self.weights.data = self.weights.data * normalize_coeff
+
+    return total_weighted_loss
+
 

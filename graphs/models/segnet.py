@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from . import unet
 
@@ -45,18 +44,16 @@ class SegNet(nn.Module):
             logits of the images.
         '''
 
-        original_image_shape = fixed_image.shape[2:]
         input_image = fixed_image
         if moving_image is not None:
-            input_image = torch.unsqueeze(torch.stack((input_image, moving_image), dim=0), 0)  # (n, 2, d, h, w)
+            input_image = torch.unsqueeze(torch.cat((input_image, moving_image), dim=1), 0)  # (n, 2, d, h, w)
         if moving_label is not None:
-            input_image = torch.unsqueeze(torch.stack((input_image, moving_label), dim=0), 0)  # (n, 2, d, h, w) or (n, 3, d, h, w)
+            input_image = torch.unsqueeze(torch.cat((input_image, moving_label), dim=1), 0)  # (n, 2, d, h, w) or (n, 3, d, h, w)
 
-        test = self.unet(input_image)
-        logits = torch.squeeze(self.unet(input_image), 0).reshape(self.n,  self.num_Classes, *original_image_shape)  #(n, classes, d, h, w)
-        probs = F.softmax(logits, dim=1)
-        _, predicted_label = torch.max(probs, dim=1, keepdim=True)
+        logits_list = self.unet(input_image)
+        # probs_list = [F.softmax(x, dim=1) for x in logits_list]
+        # predicted_label_list = [torch.max(x, dim=1, keepdim=True)[1] for x in probs_list]
 
-        res = {'logits': logits, 'probs': probs, 'predicted_label': predicted_label}
+        res = {'logits_low': logits_list[0], 'logits_mid': logits_list[1], 'logits_high': logits_list[2]}
 
         return res

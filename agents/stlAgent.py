@@ -53,8 +53,9 @@ class stlAgent(BaseAgent):
                                     depth=self.args.depth, initial_channels=self.args.initial_channels,
                                     channels_list=self.args.num_featurmaps).to(self.args.device)
                 # Create instance from the loss
-                self.ncc_loss = NCC(self.args.dim, self.args.ncc_window_size).to(self.args.device)
+                self.ncc_loss = NCC(3, self.args.ncc_window_size).to(self.args.device)
                 self.smooth_loss = GradientSmoothing(energy_type='bending')
+                self.dsc_loss = Dice().to(self.args.device)
                 self.spatial_transform = SpatialTransformer(dim=self.args.num_classes)
             else:
                 print('Unknown Netowrk')
@@ -124,7 +125,7 @@ class stlAgent(BaseAgent):
             self.current_epoch = epoch
             self.train_one_epoch()
 
-            if (epoch) % self.args.validate_every == 0:
+            if (epoch) % self.args.validation_rate == 0:
                 self.validate()
 
             self.save_checkpoint()
@@ -154,21 +155,21 @@ class stlAgent(BaseAgent):
             nbatches, wsize, nchannels, x, y, z, _ = fimage.size()
 
             # forward pass
-            if self.args.in_channels == 1:
+            if len(self.args.input) == 1:
                 res = self.model(data_dict['fimage'])
-            elif self.args.in_channels == 2 and 'Im' in self.args.input:
+            elif len(self.args.input) == 2 and 'Im' in self.args.input:
                 res = self.model(data_dict['fimage'], data_dict['mimage'])
-            elif self.args.in_channels == 2 and 'Sm' in self.args.input:
+            elif len(self.args.input) and 'Sm' in self.args.input:
                 res = self.model(data_dict['fimage'], data_dict['mlabel'])
-            elif self.args.in_channels == 3:
+            elif len(self.args.input) == 3:
                 res = self.model(data_dict['fimage'], data_dict['mimage'], data_dict['mlabel'])
             else:
                 self.logger.error(self.args.input_segmentation, "wrong input")
 
             if self.args.network == 'Seg':
-                dsc_loss_high, dsc_list_high = self.dsc_loss(data_dict['flabel_high'], res['x_high_res'])
-                dsc_loss_mid, dsc_list_mid = self.dsc_loss(data_dict['flabel_mid'], res['x_mid_res'])
-                dsc_loss_low, dsc_list_low = self.dsc_loss(data_dict['flabel_low'], res['x_low_res'])
+                dsc_loss_high, dsc_list_high = self.dsc_loss(data_dict['flabel_high'], res['logits_high'])
+                dsc_loss_mid, dsc_list_mid = self.dsc_loss(data_dict['flabel_mid'], res['logits_mid'])
+                dsc_loss_low, dsc_list_low = self.dsc_loss(data_dict['flabel_low'], res['logits_low'])
 
                 dsc_loss = self.args.level_weights[0] * dsc_loss_high + \
                                self.args.level_weights[1] * dsc_loss_mid + \
@@ -179,14 +180,14 @@ class stlAgent(BaseAgent):
 
             elif self.args.network == 'Reg':
 
-                mimage_high_out = self.spatial_transform(data_dict['mimage_high'], res['high_res_dvf'])
-                mimage_mid_out = self.spatial_transform(data_dict['mimage_mid'], res['mid_res_dvf'])
-                mimage_low_out = self.spatial_transform(data_dict['mimage_low'], res['low_res_dvf'])
+                mimage_high_out = self.spatial_transform(data_dict['mimage_high'], res['dvf_high'])
+                mimage_mid_out = self.spatial_transform(data_dict['mimage_mid'], res['dvf_mid'])
+                mimage_low_out = self.spatial_transform(data_dict['mimage_low'], res['dvf_low'])
 
-                mlabel_high_out = self.spatial_transform(data_dict['mlabel_high_hot'], res['high_res_dvf'],
+                mlabel_high_out = self.spatial_transform(data_dict['mlabel_high_hot'], res['dvf_high'],
                                                          mode='nearest')
-                mlabel_mid_out = self.spatial_transform(data_dict['mlabel_mid_hot'], res['mid_res_dvf'], mode='nearest')
-                mlabel_low_out = self.spatial_transform(data_dict['mlabel_low_hot'], res['low_res_dvf'], mode='nearest')
+                mlabel_mid_out = self.spatial_transform(data_dict['mlabel_mid_hot'], res['dvf_mid'], mode='nearest')
+                mlabel_low_out = self.spatial_transform(data_dict['mlabel_low_hot'], res['dvf_low'], mode='nearest')
 
                 reg_dsc_loss_high, reg_dsc_list_high = self.dsc_loss(data_dict['flabel_high'], mlabel_high_out,
                                                                      use_activation=False)
@@ -199,9 +200,9 @@ class stlAgent(BaseAgent):
                 ncc_loss_mid = self.ncc_loss(data_dict['fimage_mid'], mimage_mid_out)
                 ncc_loss_low = self.ncc_loss(data_dict['fimage_low'], mimage_low_out)
 
-                smooth_loss_high = self.smooth_loss(res['high_res_dvf'])
-                smooth_loss_mid = self.smooth_loss(res['mid_res_dvf'])
-                smooth_loss_low = self.smooth_loss(res['low_res_dvf'])
+                smooth_loss_high = self.smooth_loss(res['dvf_high'])
+                smooth_loss_mid = self.smooth_loss(res['dvf_mid'])
+                smooth_loss_low = self.smooth_loss(res['dvf_low'])
 
                 dsc_loss = self.args.level_weights[0] * reg_dsc_loss_high + \
                                self.args.level_weights[1] * reg_dsc_loss_mid + \
@@ -226,10 +227,10 @@ class stlAgent(BaseAgent):
             epoch_samples += fimage.size(0)
             running_loss += loss.item() * fimage.size(0)
             running_dsc_loss += dsc_loss.item() * fimage.size(0)
-            running_dsc += (1.0 - dsc_loss_high.item()) * fimage.size(0)
+            running_dsc += (1.0 - dsc_loss.item()) * fimage.size(0)
             if self.args.network == 'Reg':
                 running_ncc_loss += ncc_loss.item() * fimage.size(0)
-                running_ncc += (1.0 - ncc_loss_high.item()) * fimage.size(0)
+                running_ncc += (1.0 - ncc_loss.item()) * fimage.size(0)
                 running_smooth_loss += smooth_loss.item() * fimage.size(0)
 
             self.data_iteration = (self.current_iteration + 1) * nbatches * wsize
@@ -245,8 +246,8 @@ class stlAgent(BaseAgent):
 
         if self.args.network == 'Seg':
             self.logger.info('{} totalLoss: {:.4f} dscLoss: {:.4f} dsc: {:.4f}'.
-                             format('validation', epoch_loss, epoch_dsc_loss, epoch_dsc))
-        if self.args.network == 'Reg':
+                             format('Training', epoch_loss, epoch_dsc_loss, epoch_dsc))
+        elif self.args.network == 'Reg':
             epoch_ncc_loss = running_ncc_loss / epoch_samples
             epoch_smooth_loss = running_smooth_loss / epoch_samples
             epoch_ncc = running_ncc / epoch_samples
@@ -254,7 +255,7 @@ class stlAgent(BaseAgent):
             self.summary_writer.add_scalars("Metrics/ncc", {'train': epoch_ncc}, self.current_epoch)
             self.summary_writer.add_scalars("DVF/bending_energy", {'train': epoch_smooth_loss}, self.current_epoch)
             self.logger.info('{} totalLoss: {:.4f} dscLoss: {:.4f} nccLoss: {:.4f} dvfLoss: {:.4f} dsc: {:.4f} ncc: {:.4f}'.
-                format('validation', epoch_loss, epoch_dsc_loss, epoch_ncc_loss, epoch_smooth_loss, epoch_dsc))
+                format('Training', epoch_loss, epoch_dsc_loss, epoch_ncc_loss, epoch_smooth_loss, epoch_dsc, epoch_ncc))
 
 
 
@@ -279,21 +280,21 @@ class stlAgent(BaseAgent):
                 nbatches, wsize, nchannels, x, y, z, _ = fimage.size()
 
                 # forward pass
-                if self.args.in_channels == 1:
+                if len(self.args.input) == 1:
                     res = self.model(data_dict['fimage'])
-                elif self.args.in_channels == 2 and 'Im' in self.args.input:
+                elif len(self.args.input) == 2 and 'Im' in self.args.input:
                     res = self.model(data_dict['fimage'], data_dict['mimage'])
-                elif self.args.in_channels == 2 and 'Sm' in self.args.input:
+                elif len(self.args.input) == 2 and 'Sm' in self.args.input:
                     res = self.model(data_dict['fimage'], data_dict['mlabel'])
-                elif self.args.in_channels == 3:
+                elif len(self.args.input) == 3:
                     res = self.model(data_dict['fimage'], data_dict['mimage'], data_dict['mlabel'])
                 else:
                     self.logger.error(self.args.input, "wrong input")
 
                 if self.args.network == 'Seg':
-                    dsc_loss_high, dsc_list_high = self.dsc_loss(data_dict['flabel_high'], res['x_high_res'])
-                    dsc_loss_mid, dsc_list_mid = self.dsc_loss(data_dict['flabel_mid'], res['x_mid_res'])
-                    dsc_loss_low, dsc_list_low = self.dsc_loss(data_dict['flabel_low'], res['x_low_res'])
+                    dsc_loss_high, dsc_list_high = self.dsc_loss(data_dict['flabel_high'], res['logits_high'])
+                    dsc_loss_mid, dsc_list_mid = self.dsc_loss(data_dict['flabel_mid'], res['logits_mid'])
+                    dsc_loss_low, dsc_list_low = self.dsc_loss(data_dict['flabel_low'], res['logits_low'])
 
                     dsc_loss = self.args.level_weights[0] * dsc_loss_high + \
                                self.args.level_weights[1] * dsc_loss_mid + \
@@ -304,15 +305,15 @@ class stlAgent(BaseAgent):
 
                 elif self.args.network == 'Reg':
 
-                    mimage_high_out = self.spatial_transform(data_dict['mimage_high'], res['high_res_dvf'])
-                    mimage_mid_out = self.spatial_transform(data_dict['mimage_mid'], res['mid_res_dvf'])
-                    mimage_low_out = self.spatial_transform(data_dict['mimage_low'], res['low_res_dvf'])
+                    mimage_high_out = self.spatial_transform(data_dict['mimage_high'], res['dvf_high'])
+                    mimage_mid_out = self.spatial_transform(data_dict['mimage_mid'], res['dvf_mid'])
+                    mimage_low_out = self.spatial_transform(data_dict['mimage_low'], res['dvf_low'])
 
-                    mlabel_high_out = self.spatial_transform(data_dict['mlabel_high_hot'], res['high_res_dvf'],
+                    mlabel_high_out = self.spatial_transform(data_dict['mlabel_high_hot'], res['dvf_high'],
                                                              mode='nearest')
-                    mlabel_mid_out = self.spatial_transform(data_dict['mlabel_mid_hot'], res['mid_res_dvf'],
+                    mlabel_mid_out = self.spatial_transform(data_dict['mlabel_mid_hot'], res['dvf_mid'],
                                                             mode='nearest')
-                    mlabel_low_out = self.spatial_transform(data_dict['mlabel_low_hot'], res['low_res_dvf'],
+                    mlabel_low_out = self.spatial_transform(data_dict['mlabel_low_hot'], res['dvf_low'],
                                                             mode='nearest')
 
                     reg_dsc_loss_high, reg_dsc_list_high = self.dsc_loss(data_dict['flabel_high'], mlabel_high_out,
@@ -326,9 +327,9 @@ class stlAgent(BaseAgent):
                     ncc_loss_mid = self.ncc_loss(data_dict['fimage_mid'], mimage_mid_out)
                     ncc_loss_low = self.ncc_loss(data_dict['fimage_low'], mimage_low_out)
 
-                    smooth_loss_high = self.smooth_loss(res['high_res_dvf'])
-                    smooth_loss_mid = self.smooth_loss(res['mid_res_dvf'])
-                    smooth_loss_low = self.smooth_loss(res['low_res_dvf'])
+                    smooth_loss_high = self.smooth_loss(res['dvf_high'])
+                    smooth_loss_mid = self.smooth_loss(res['dvf_mid'])
+                    smooth_loss_low = self.smooth_loss(res['dvf_low'])
 
                     dsc_loss = self.args.level_weights[0] * reg_dsc_loss_high + \
                                self.args.level_weights[1] * reg_dsc_loss_mid + \
@@ -344,19 +345,15 @@ class stlAgent(BaseAgent):
 
                     loss = ncc_loss + self.args.w_bending_energy * smooth_loss
 
-                # backpropagation
-                loss.backward()
-                # optimization
-                self.optimizer.step()
 
                 # statistics
                 epoch_samples += fimage.size(0)
                 running_loss += loss.item() * fimage.size(0)
                 running_dsc_loss += dsc_loss.item() * fimage.size(0)
-                running_dsc += (1.0 - dsc_loss_high.item()) * fimage.size(0)
+                running_dsc += (1.0 - dsc_loss.item()) * fimage.size(0)
                 if self.args.network == 'Reg':
                     running_ncc_loss += ncc_loss.item() * fimage.size(0)
-                    running_ncc += (1.0 - ncc_loss_high.item()) * fimage.size(0)
+                    running_ncc += (1.0 - ncc_loss.item()) * fimage.size(0)
                     running_smooth_loss += smooth_loss.item() * fimage.size(0)
 
                 self.data_iteration = (self.current_iteration + 1) * nbatches * wsize
@@ -373,7 +370,7 @@ class stlAgent(BaseAgent):
             if self.args.network == 'Seg':
                 self.logger.info('{} totalLoss: {:.4f} dscLoss: {:.4f} dsc: {:.4f}'.
                                  format('validation', epoch_loss, epoch_dsc_loss, epoch_dsc))
-            if self.args.network == 'Reg':
+            elif self.args.network == 'Reg':
                 epoch_ncc_loss = running_ncc_loss / epoch_samples
                 epoch_smooth_loss = running_smooth_loss / epoch_samples
                 epoch_ncc = running_ncc / epoch_samples
@@ -382,7 +379,7 @@ class stlAgent(BaseAgent):
                 self.summary_writer.add_scalars("DVF/bending_energy", {'train': epoch_smooth_loss}, self.current_epoch)
 
                 self.logger.info('{} totalLoss: {:.4f} dscLoss: {:.4f} nccLoss: {:.4f} dvfLoss: {:.4f} dsc: {:.4f} ncc: {:.4f}'.
-                    format('validation', epoch_loss, epoch_dsc_loss, epoch_ncc_loss, epoch_smooth_loss, epoch_dsc))
+                    format('validation', epoch_loss, epoch_dsc_loss, epoch_ncc_loss, epoch_smooth_loss, epoch_dsc, epoch_ncc))
 
     def inference(self):
 
@@ -468,16 +465,17 @@ class stlAgent(BaseAgent):
                             self.logger.error(self.args.input, "wrong input")
 
                     if self.args.network == 'Seg':
-                        segmentation = res['predicted_label']
+                        probs = F.softmax(res['logits_high'], dim=1)
+                        _, segmentation = torch.max(probs, dim=1, keepdim=True)
                         out_label_dummies[tuple(out_slicer)] = np.transpose(segmentation.cpu().numpy(), (0, 2, 3, 4, 1)) #BxDxWxHxC
 
                     elif self.args.network == 'Reg':
                         mimage_window_high = resize_image_mlvl(self.args, mimage_window, 0)
                         mlabel_window_high = resize_image_mlvl(self.args, mlabel_window, 0)
-                        mimage_high_out = self.spatial_transform(mimage_window_high, res['high_res_dvf'], mode='trilinear')
-                        mlabel_high_out = self.spatial_transform(mlabel_window_high, res['high_res_dvf'], mode='nearest')
+                        mimage_high_out = self.spatial_transform(mimage_window_high, res['dvf_high'], mode='trilinear')
+                        mlabel_high_out = self.spatial_transform(mlabel_window_high, res['dvf_high'], mode='nearest')
                         out_fimage_dummies[tuple(out_slicer)] = np.transpose(mimage_high_out.cpu().numpy(), (0, 2, 3, 4, 1)) #BxDxWxHxC
-                        out_dvf_dummies[tuple(out_slicer)] = res['high_res_dvf'].cpu().numpy() #BxDxWxHxC
+                        out_dvf_dummies[tuple(out_slicer)] = res['dvf_high'].cpu().numpy() #BxDxWxHxC
                         out_label_dummies[tuple(out_slicer)] = np.transpose(mlabel_high_out.cpu().numpy(),
                                                                              (0, 2, 3, 4, 1))  # BxDxWxHxC
 
@@ -522,7 +520,7 @@ class stlAgent(BaseAgent):
 
 
     def eval(self):
-        evaluation(self.args, self.config)
+        evaluation(self.args, self.data_config)
 
     def finalize(self):
         """
